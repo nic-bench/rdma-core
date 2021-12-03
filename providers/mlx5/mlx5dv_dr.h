@@ -52,6 +52,8 @@
 #define dr_dbg_ctx(ctx, arg...)					\
 	mlx5_dbg(to_mctx(ctx)->dbg_fp, MLX5_DBG_DR, ##arg);
 
+#define dbg(arg...)
+
 enum dr_icm_chunk_size {
 	DR_CHUNK_SIZE_1,
 	DR_CHUNK_SIZE_MIN = DR_CHUNK_SIZE_1, /* keep updated when changing */
@@ -335,6 +337,8 @@ static inline void dr_ste_put(struct dr_ste *ste,
 	if (atomic_fetch_sub(&ste->refcount, 1) == 1)
 		dr_ste_free(ste, matcher, nic_matcher);
 }
+
+uint8_t *dr_ste_get_tag(uint8_t *hw_ste_p);
 
 /* initial as 0, increased only when ste appears in a new rule */
 static inline void dr_ste_get(struct dr_ste *ste)

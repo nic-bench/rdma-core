@@ -189,7 +189,7 @@ static uint16_t dr_ste_conv_bit_to_byte_mask(uint8_t *bit_mask)
 	return byte_mask;
 }
 
-static uint8_t *dr_ste_get_tag(uint8_t *hw_ste_p)
+uint8_t *dr_ste_get_tag(uint8_t *hw_ste_p)
 {
 	struct dr_hw_ste_format *hw_ste = (struct dr_hw_ste_format *)hw_ste_p;
 

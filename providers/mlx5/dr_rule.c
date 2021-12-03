@@ -1317,6 +1317,388 @@ struct mlx5dv_dr_rule *mlx5dv_dr_rule_create(struct mlx5dv_dr_matcher *matcher,
 	return rule;
 }
 
+static inline int
+dr_rule_update_rule_nic(struct mlx5dv_dr_rule *rule,
+			struct dr_rule_rx_tx *nic_rule,
+			struct dr_match_param *param,
+			size_t num_actions,
+			struct mlx5dv_dr_action *actions[])
+{
+
+    __builtin_prefetch(nic_rule->rule_members_list.n.next);
+	struct dr_matcher_rx_tx *nic_matcher = nic_rule->nic_matcher;
+	struct mlx5dv_dr_matcher *matcher = rule->matcher;
+	struct mlx5dv_dr_domain *dmn = matcher->tbl->dmn;
+	struct dr_ste_htbl *cur_htbl;
+	LIST_HEAD(send_ste_list);
+	int ret, i;
+    struct dr_ste_build *sb;
+	sb = nic_matcher->ste_builder;
+
+    dbg("Update rule NIC\n");
+	struct dr_rule_member *rule_mem;
+	struct dr_rule_member *tmp_mem;
+    int use_update_list = false;
+	i = 0;
+
+	cur_htbl = nic_matcher->s_htbl;
+	//dr_rule_clean_rule_members(rule, nic_rule);
+
+
+	list_for_each_safe(&nic_rule->rule_members_list, rule_mem, tmp_mem, list) {
+//		list_del(&rule_mem->list);
+        __builtin_prefetch(rule_mem->ste);
+        dbg("Delete ste of htbl %p, ste %p\n", rule_mem->ste->htbl,rule_mem->ste);
+//		free(rule_mem);
+	}
+	struct dr_domain_rx_tx *nic_dmn = nic_matcher->nic_tbl->nic_dmn;
+	struct dr_ste_send_info *ste_info, *tmp_ste_info;
+	struct dr_ste_htbl *htbl = NULL;
+	struct dr_ste *ste = NULL; /* Fix compilation warning */
+
+    dbg("DR RULE CREATE A,, rule %p, matcher %p\n",rule,matcher);
+	//list_head_init(&nic_rule->rule_members_list);
+/*
+	if (dr_rule_skip(dmn->type, nic_dmn->ste_type, &matcher->mask, param))
+		return 0;
+
+	// Set the tag values inside the ste array
+	ret = dr_ste_build_ste_arr(matcher, nic_matcher, param, hw_ste_arr);
+	if (ret)
+		return -6;*/
+
+	/* Set the actions values/addresses inside the ste array */
+	/*ret = dr_actions_build_ste_arr(matcher, nic_matcher, actions,
+				       num_actions, hw_ste_arr,
+				       &new_hw_ste_arr_sz);*/
+    //last_ste=
+	//dr_ste_set_hit_addr(last_ste, final_icm_addr, 1);
+	if (ret)
+		return -5;
+
+	cur_htbl = nic_matcher->s_htbl;
+
+    rule_mem = list_top(&nic_rule->rule_members_list, struct dr_rule_member, list);
+	/*
+	 * Go over the array of STEs, and build dr_ste accordingly.
+	 * The loop is over only the builders which are equeal or less to the
+	 * number of stes, in case we have actions that lives in other stes.
+	 */
+	for (i = 0; i < nic_matcher->num_of_builders; i++) {
+   // list_for_each_safe(&nic_rule->rule_members_list, rule_mem, tmp_mem, list) {
+	//	list_del(&rule_mem->list);
+	//	list_del(&rule_mem->use_ste_list);
+    //
+    //
+        struct dr_ste* orig_ste = rule_mem->ste;
+	    uint8_t hw_ste_arr[DR_STE_SIZE] = {};
+		uint8_t *hw_ste = hw_ste_arr;
+        memcpy(hw_ste, orig_ste->hw_ste, DR_STE_SIZE);
+
+	    dr_ste_set_bit_mask(hw_ste, sb->bit_mask);
+
+		ret = sb->ste_build_tag_func(param, sb, dr_ste_get_tag(hw_ste));
+
+		if (cur_htbl != orig_ste->htbl) {
+            // One is a collision, the other not. It's too complex so we
+            // continue to the full delete of this level + rebuild
+        } else {
+            if  (!dr_ste_equal_tag(rule_mem->ste->hw_ste, hw_ste)) {
+                int old_idx = dr_ste_calc_hash_index(orig_ste->hw_ste, cur_htbl);
+                int new_idx = dr_ste_calc_hash_index(hw_ste, cur_htbl);
+
+	            struct dr_ste* new_ste = &cur_htbl->ste_arr[new_idx];
+                //printf("Different STE val %x %x index %d %d, UC %d, htbl %p, new ste %p\n", *orig_ste->hw_ste, *hw_ste, old_idx,new_idx,orig_ste->refcount,orig_ste->htbl,new_ste);
+                __builtin_prefetch(new_ste);
+                if (new_idx == old_idx) {
+                    memcpy(new_ste->hw_ste, hw_ste, DR_STE_SIZE_REDUCED);
+                    dr_send_postsend_ste(dmn, new_ste, hw_ste,  DR_STE_SIZE, 0);
+
+                    cur_htbl = orig_ste->next_htbl;
+                    goto advance;
+                } else {
+                    if (dr_ste_is_not_used(new_ste)) {
+/*
+                        struct list_head *miss_list;
+                        miss_list = &cur_htbl->chunk->miss_list[new_idx];
+
+                        list_add_tail(miss_list, &new_ste->miss_list_node);
+
+                        dr_ste_set_miss_addr(hw_ste, nic_matcher->e_anchor->chunk->icm_addr);
+
+                        new_ste->ste_chain_location = i+1;
+                        dr_htbl_get(cur_htbl);
+			cur_htbl->ctrl.num_of_valid_entries++;
+
+//                        new_ste->htbl = htbl;
+                        new_ste->next_htbl = cur_htbl;
+                        memcpy(new_ste->hw_ste, hw_ste, DR_STE_SIZE_REDUCED);
+                        dr_send_postsend_ste(dmn, new_ste, hw_ste,  DR_STE_SIZE, 0);
+			    list_del(&rule_mem->use_ste_list);
+                        dr_ste_put(rule_mem->ste, rule->matcher, nic_rule->nic_matcher);
+
+                        ste = new_ste;
+
+                        goto replace_ste;*/
+                    }
+                    // else, go to full rebuild
+
+
+                }
+            } else {
+                //No update!
+                cur_htbl = orig_ste->next_htbl;
+                goto advance;
+            }
+        }
+
+
+
+		    list_del(&rule_mem->use_ste_list);
+            dr_ste_put(rule_mem->ste, rule->matcher, nic_rule->nic_matcher);
+            ste = dr_rule_handle_ste_branch(rule,
+                            nic_rule,
+                            &send_ste_list,
+                            cur_htbl,
+                            hw_ste,
+                            i + 1,
+                            &htbl);
+            dbg("Create %p, htbl %p, entries %d\n", ste, ste->htbl, ste->htbl->ctrl.num_of_valid_entries );
+            if (!ste) {
+                dr_dbg(dmn, "Failed creating next branch\n");
+                ret = errno;
+                return -4;
+            }
+
+            dbg("Cur htbl%p\n", cur_htbl);
+
+            /* Keep all STEs in the rule struct */
+
+    replace_ste:
+
+            cur_htbl = ste->next_htbl;
+            rule_mem->ste = ste;
+        /*	list_add_tail(&nic_rule->rule_members_list, &rule_mem->list);
+        */
+            list_add_tail(&ste->rule_list, &rule_mem->use_ste_list);
+
+            dr_ste_get(ste);
+            //End of full rebuild
+        advance:
+        sb++;
+		rule_mem = list_next(&nic_rule->rule_members_list, rule_mem, list);
+	}
+
+	/* Connect actions */
+/*	ret = dr_rule_handle_action_stes(rule, nic_rule, &send_ste_list,
+					 ste, hw_ste_arr, new_hw_ste_arr_sz);
+	if (ret) {
+		dr_dbg(dmn, "Failed apply actions\n");
+		return -2;
+	}*/
+	ret = dr_rule_send_update_list(&send_ste_list, dmn, true);
+	if (ret) {
+		dr_dbg(dmn, "Failed sending ste!\n");
+	    return -3;
+	}
+
+	if (htbl)
+		dr_htbl_put(htbl);
+
+	return 0;
+#if 0
+    list_for_each_safe(&nic_rule->rule_members_list, rule_mem, tmp_mem, list) {
+	    struct dr_ste* orig_ste = rule_mem->ste;
+
+    //struct* list_node = nic_rule->rules_members_list.n;
+//for (i = 0; i < nic_matcher->num_of_builders; i++) {
+		/* Calculate CRC and keep new ste entry */
+
+        uint8_t *hw_ste = hw_ste_arr + (i * DR_STE_SIZE);
+
+/*        uint8_t hw_ste_arr[DR_STE_SIZE] = {0};
+        uint8_t* hw_ste = hw_ste_arr;
+*/
+        //cur_htbl = ste->htbl;
+
+	   // dbg("%p %d entr, coll %d\n", cur_htbl, cur_htbl->ctrl.num_of_valid_entries, cur_htbl->ctrl.num_of_collisions );
+       /*  memcpy(hw_ste, ste->hw_ste, DR_STE_SIZE);
+	    dr_ste_set_bit_mask(hw_ste, sb->bit_mask);
+
+		ret = sb->ste_build_tag_func(param, sb, dr_ste_get_tag(hw_ste));
+
+		if (!dr_ste_equal_tag(ste->hw_ste, hw_ste)) {
+		ste = dr_rule_handle_ste_branch(rule,
+						nic_rule,
+						&send_ste_list,
+						cur_htbl,
+						cur_hw_ste_ent,
+						i + 1,
+						&htbl);
+        dbg("Update %p, htbl %p, entries %d\n", ste, ste->htbl, ste->htbl->ctrl.num_of_valid_entries );
+*/
+
+	    dbg("%p -%p %d entr, coll %d\n", cur_htbl, orig_ste->htbl, cur_htbl->ctrl.num_of_valid_entries, cur_htbl->ctrl.num_of_collisions );
+        memcpy(hw_ste, orig_ste->hw_ste, DR_STE_SIZE);
+	    dr_ste_set_bit_mask(hw_ste, sb->bit_mask);
+
+		ret = sb->ste_build_tag_func(param, sb, dr_ste_get_tag(hw_ste));
+
+		if (!dr_ste_equal_tag(orig_ste->hw_ste, hw_ste)) {
+
+            int old_idx = dr_ste_calc_hash_index(orig_ste->hw_ste, cur_htbl);
+            int new_idx = dr_ste_calc_hash_index(hw_ste, cur_htbl);
+
+            dbg("Different STE val %x %x index %d %d, UC %d\n", *orig_ste->hw_ste, *hw_ste, old_idx,new_idx,orig_ste->refcount);
+	        struct dr_ste* new_ste = &cur_htbl->ste_arr[new_idx];
+
+            __builtin_prefetch(new_ste);
+            if (new_idx != old_idx) {
+
+                dbg("ORIG STe miss %p", dr_ste_get_miss_list(orig_ste));
+	        /*    if (atomic_fetch_sub(&orig_ste->refcount, 1) == 1) {
+                    dbg("Free old\n");
+                    dr_htbl_get(cur_htbl);
+	                cur_htbl->ctrl.num_of_valid_entries++;
+                    dr_ste_free(orig_ste, rule->matcher, nic_rule->nic_matcher);
+                }*/
+				struct list_head *miss_list;
+                miss_list = &cur_htbl->chunk->miss_list[new_idx];
+
+                if (dr_ste_is_not_used(new_ste)) {
+
+                    dbg("STE is not used\n");
+                    /* new entry -> new branch */
+                    list_add_tail(miss_list, &new_ste->miss_list_node);
+
+                    dr_ste_set_miss_addr(hw_ste, nic_matcher->e_anchor->chunk->icm_addr);
+
+                    new_ste->ste_chain_location = i+1;
+
+                    /*if (dr_ste_create_next_htbl(matcher,
+                                    nic_matcher,
+                                    new_ste,
+                                    hw_ste,
+                                    DR_CHUNK_SIZE_1)) {
+                        dr_dbg(matcher->tbl->dmn, "Failed allocating table\n");
+                    }*/
+
+    /*	dr_send_fill_and_append_ste_send_info(ste, DR_STE_SIZE, 0, hw_ste,
+                              ste_info, send_list, false);*/
+            dbg("STe miss %p", dr_ste_get_miss_list(new_ste));
+            dbg("UPDATING STE MEM!\n");
+
+	list_add_tail(&new_ste->rule_list, &rule_mem->use_ste_list);
+            memcpy(new_ste->hw_ste, hw_ste, DR_STE_SIZE_REDUCED);
+            dr_send_postsend_ste(dmn, new_ste, hw_ste,
+                   DR_STE_SIZE, 0);
+            rule_mem->ste = new_ste;
+
+		    dr_ste_get(new_ste);
+            dbg("HTBL is %p\n", rule_mem->ste->htbl);
+
+                } else {
+#if 0
+                    struct dr_ste* matched_ste = dr_rule_find_ste_in_miss_list(miss_list, hw_ste);
+		            if (matched_ste) {
+
+                    dbg("STE ALREADY EXISTS\n");
+                    }
+
+                    dbg("STE is used\n");
+                        new_ste = dr_rule_rehash_handle_collision(matcher,
+                                              nic_matcher,
+                                              &send_ste_list,
+                                              new_ste, //used to get miss_list of the new entry
+                                              hw_ste);
+                        if (!new_ste) {
+                            dr_dbg(matcher->tbl->dmn, "Failed adding collision entry, index: %d\n",
+                                   new_idx);
+                            return -1;;
+                        }
+
+                        cur_htbl->ctrl.num_of_collisions++;
+                        use_update_list = true;
+#endif
+                } //ste is not used
+            } //Idx is different
+		    cur_htbl = new_ste->next_htbl;
+        } else
+
+		    cur_htbl = orig_ste->next_htbl;
+
+        i++;
+        sb++;
+    }
+
+    if (use_update_list) {
+
+	    ret = dr_rule_send_update_list(&send_ste_list, dmn, true);
+    }
+#endif
+	return ret;
+}
+
+static inline int
+dr_rule_update_rule(struct mlx5dv_dr_rule *rule,
+		    struct mlx5dv_flow_match_parameters *value,
+		    size_t num_actions,
+		    struct mlx5dv_dr_action *actions[])
+{
+	struct mlx5dv_dr_matcher *matcher = rule->matcher;
+	struct mlx5dv_dr_domain *dmn = matcher->tbl->dmn;
+	struct dr_match_param param = {};
+	int ret;
+    dbg("Update rule B\n");
+
+	dr_ste_copy_param(matcher->match_criteria, &param, value);
+/*	if (!dr_rule_verify(matcher, value, &param)) {
+
+    return EINVAL;;
+        }
+
+    ret = dr_rule_add_action_members(rule, num_actions, actions);
+	if (ret)
+        return -1;
+*/
+	switch (dmn->type) {
+	case MLX5DV_DR_DOMAIN_TYPE_NIC_RX:
+		rule->rx.nic_matcher = &matcher->rx;
+		ret = dr_rule_update_rule_nic(rule, &rule->rx, &param,
+					      num_actions, actions);
+		return ret;
+	case MLX5DV_DR_DOMAIN_TYPE_NIC_TX:
+		return ENOTSUP;
+	case MLX5DV_DR_DOMAIN_TYPE_FDB:
+		return ENOTSUP;
+	default:
+		return EINVAL;
+	}
+}
+
+
+
+int mlx5dv_dr_rule_update(struct mlx5dv_dr_rule *rule,
+					     struct mlx5dv_flow_match_parameters *value,
+					     size_t num_actions,
+					     struct mlx5dv_dr_action *actions[])
+{
+	struct mlx5dv_dr_matcher *matcher = rule->matcher;
+	pthread_mutex_lock(&matcher->tbl->dmn->mutex);
+    dbg("DR RULE UPDATE A,, rule %p, matcher %p\n",rule,matcher);
+    int ret;
+
+	if (dr_is_root_table(matcher->tbl)) {
+        dbg("UPDATING ROOT!!!\n");
+	    return -ENOTSUP;
+    } else
+		ret = dr_rule_update_rule(rule, value, num_actions, actions);
+
+    pthread_mutex_unlock(&matcher->tbl->dmn->mutex);
+
+	return ret;
+}
+
 int mlx5dv_dr_rule_destroy(struct mlx5dv_dr_rule *rule)
 {
 	struct mlx5dv_dr_matcher *matcher = rule->matcher;

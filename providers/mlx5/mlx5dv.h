@@ -357,6 +357,8 @@ mlx5dv_create_flow(struct mlx5dv_flow_matcher *matcher,
 		   size_t num_actions,
 		   struct mlx5dv_flow_action_attr actions_attr[]);
 
+
+
 struct ibv_flow_action *mlx5dv_create_flow_action_esp(struct ibv_context *ctx,
 						      struct ibv_flow_action_esp_attr *esp,
 						      struct mlx5dv_flow_action_esp *mlx5_attr);
@@ -1480,6 +1482,11 @@ mlx5dv_dr_rule_create(struct mlx5dv_dr_matcher *matcher,
 		      struct mlx5dv_flow_match_parameters *value,
 		      size_t num_actions,
 		      struct mlx5dv_dr_action *actions[]);
+
+int mlx5dv_dr_rule_update(struct mlx5dv_dr_rule *rule,
+                         struct mlx5dv_flow_match_parameters *value,
+					     size_t num_actions,
+					     struct mlx5dv_dr_action *actions[]);
 
 int mlx5dv_dr_rule_destroy(struct mlx5dv_dr_rule *rule);
 

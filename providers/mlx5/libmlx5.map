@@ -145,4 +145,5 @@ MLX5_1.14 {
 MLX5_1.15 {
 	global:
 		mlx5dv_dr_action_create_dest_devx_tir;
+		mlx5dv_dr_rule_update;
 } MLX5_1.14;
